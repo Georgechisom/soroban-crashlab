@@ -1,27 +1,22 @@
-/**
- * Server instrumentation entrypoint.
- *
- * This file exposes the real Sentry integration adapter API for use by
- * runtime instrumentation or server-side instrumentation wiring.
- */
+// Issue #1842: Boot-time configuration validation hook
+// This file is called once during server startup (Next.js instrumentation hook)
 
-import { createSentryAdapter } from './lib/integrations/sentry-adapter';
-import type {
-  SentryConfig,
-  CrashReport,
-} from './features/integrations/integrate-sentry-integration-for-crash-reporting-utils';
-import type {
-  SentryAdapterOptions,
-  SentryConnectionTestResult,
-} from './lib/integrations/sentry-adapter';
+export async function register() {
+  if (process.env.NEXT_RUNTIME === "nodejs") {
+    // Validate configuration at boot time
+    const { validateAndThrow } = await import("./lib/config/validate");
 
-export {
-  createSentryAdapter,
-  type SentryAdapterOptions,
-  type SentryConfig,
-  type CrashReport,
-  type SentryConnectionTestResult,
-};
-
-const instrumentation = { createSentryAdapter };
-export default instrumentation;
+    try {
+      validateAndThrow();
+      console.log("✅ Configuration validation passed");
+    } catch (error) {
+      console.error(
+        "\n" +
+          (error instanceof Error
+            ? error.message
+            : "Configuration validation failed"),
+      );
+      process.exit(1);
+    }
+  }
+}

@@ -4,6 +4,13 @@
  * Issue #1843: Added content checksumming for corruption detection
  */
 import { createHash } from "crypto";
+ *
+ * Tenant-scoped (#1894): every artifact lives under
+ * `org/<org>/project/<project>/artifacts/<id>`, and every accessor takes the
+ * caller's `TenantScope`. There is no unscoped accessor.
+ */
+import { ScopedRepository, createMapBackend } from './tenancy/scoped-repository';
+import type { TenantScope } from './tenancy/tenant-scope';
 
 export interface StoredArtifact {
   id: string;
@@ -27,18 +34,47 @@ const globalForArtifacts = globalThis as unknown as {
 
 export const artifactStore: Map<string, StoredArtifact> =
   globalForArtifacts.crashlabArtifactStore ?? new Map<string, StoredArtifact>();
+const artifactBackend: Map<string, StoredArtifact> =
+  globalForArtifacts.crashlabArtifactStore ??
+  new Map<string, StoredArtifact>();
 
 if (process.env.NODE_ENV !== "production") {
-  globalForArtifacts.crashlabArtifactStore = artifactStore;
+  globalForArtifacts.crashlabArtifactStore = artifactBackend;
 }
 
-export function listArtifactMetadata(): Array<{
+const artifacts = new ScopedRepository<Omit<StoredArtifact, "id">>({
+  collection: "art",
+  backend: createMapBackend(artifactBackend),
+});
+
+export function putArtifact(
+  scope: TenantScope,
+  artifact: { name: string; buffer: Buffer; createdAt?: string },
+): StoredArtifact {
+  return artifacts.create(scope, {
+    name: artifact.name,
+    buffer: artifact.buffer,
+    sizeBytes: artifact.buffer.byteLength,
+    createdAt: artifact.createdAt ?? new Date().toISOString(),
+  });
+}
+
+export function getArtifact(scope: TenantScope, id: string): StoredArtifact | null {
+  return artifacts.get(scope, id);
+}
+
+export function deleteArtifact(scope: TenantScope, id: string): boolean {
+  return artifacts.delete(scope, id);
+}
+
+export function listArtifactMetadata(scope: TenantScope): Array<{
   id: string;
   name: string;
   createdAt: string;
   sizeBytes: number;
 }> {
-  return Array.from(artifactStore.values())
+  return artifacts
+    .list(scope)
     .map(({ id, name, createdAt, sizeBytes }) => ({
       id,
       name,
